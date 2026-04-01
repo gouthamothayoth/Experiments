@@ -21,7 +21,7 @@
       text-rendering: optimizeLegibility;
     }
 
-    /* ── Start screen ─────────────────────────────────────────────── */
+    /* ── Start screen ──────────────────────────────────────────── */
     #start-screen {
       position: fixed;
       inset: 0;
@@ -70,35 +70,43 @@
 
     #start-btn:active { opacity: 0.7; }
 
-    /* ── Hidden paragraph used only for measuring letter positions ── */
+    /*
+     * ── Measuring paragraph ─────────────────────────────────────
+     * Spans the full viewport with safe-area padding so every line
+     * wraps naturally — exactly as it will appear as physics letters.
+     * visibility:hidden keeps it off-screen visually but still laid out.
+     */
     #para-measure {
       position: fixed;
-      top: 50%;
-      left: 50%;
-      transform: translate(-50%, -50%);
-      width: calc(100% - 48px);
-      max-width: 360px;
+      top: 0;
+      left: 0;
+      right: 0;
+      /* env() gives iPhone notch / home-bar clearance */
+      padding-top:    max(48px, env(safe-area-inset-top,    48px));
+      padding-bottom: max(32px, env(safe-area-inset-bottom, 32px));
+      padding-left:   max(24px, env(safe-area-inset-left,   24px));
+      padding-right:  max(24px, env(safe-area-inset-right,  24px));
       font-family: 'Courier Prime', 'Courier New', Courier, monospace;
-      font-size: 18px;
       font-weight: 400;
-      line-height: 1.85;
+      line-height: 1.8;
       color: #000;
+      white-space: normal;
+      word-break: normal;
+      overflow-wrap: break-word;
       -webkit-font-smoothing: antialiased;
       text-rendering: geometricPrecision;
-      /* Invisible but still laid out so getBoundingClientRect works */
       visibility: hidden;
       pointer-events: none;
       z-index: 1;
     }
 
-    /* ── Physics letters (fixed-positioned after measurement) ──────── */
+    /* ── Physics letters ───────────────────────────────────────── */
     .letter {
       position: fixed;
       top: 0;
       left: 0;
       color: #000;
       font-family: 'Courier Prime', 'Courier New', Courier, monospace;
-      font-size: 18px;
       font-weight: 400;
       line-height: 1;
       user-select: none;
@@ -108,21 +116,17 @@
       -moz-osx-font-smoothing: grayscale;
       text-rendering: geometricPrecision;
     }
-
   </style>
 </head>
 <body>
 
-  <!-- Start screen -->
   <div id="start-screen">
     <h1>Newton's Law of<br>Universal Gravitation</h1>
     <p>Letters start in place.<br>Tilt your phone to feel gravity.</p>
     <button id="start-btn">Begin</button>
   </div>
 
-  <!-- Invisible paragraph used to measure natural letter positions -->
   <div id="para-measure"></div>
-
 
   <script>
     const SENTENCE =
@@ -135,69 +139,78 @@
       "Newton\u2019s work Philosophi\u00e6 Naturalis Principia Mathematica, " +
       "first published on July 5, 1687.";
 
-    // ── Physics constants (gentle, slow movement) ────────────────────
-    const GRAVITY_SCALE = 0.055;  // low — very gentle drift
-    const FRICTION      = 0.994;  // high — slow, smooth deceleration
-    const BOUNCE        = 0.40;   // soft bounce off walls
+    const GRAVITY_SCALE = 0.055;
+    const FRICTION      = 0.994;
+    const BOUNCE        = 0.40;
 
-    let letters  = [];
+    let letters = [];
     let gx = 0, gy = 0;
-    let running  = false;
+    let running = false;
     let raf;
 
-    // ── Step 1: build the invisible paragraph and measure positions ──
+    // ── Fit font size so the paragraph doesn't overflow the viewport ──
+    function fitFontSize(para) {
+      // Start at a comfortable size and shrink until the content fits
+      let size = 17;
+      para.style.fontSize = size + 'px';
+      while (size > 9 && para.scrollHeight > window.innerHeight) {
+        size -= 0.5;
+        para.style.fontSize = size + 'px';
+      }
+      return size;
+    }
+
+    // ── Build invisible paragraph, measure every letter's position ────
     function measureAndBuild() {
       const para = document.getElementById('para-measure');
 
-      // Populate with one <span> per character
+      // One inline <span> per character — no white-space:pre so the
+      // paragraph wraps naturally at word boundaries
       [...SENTENCE].forEach(char => {
         const span = document.createElement('span');
-        // Use a thin no-break space for actual spaces so they have width
-        span.textContent = char === ' ' ? '\u202F\u202F' : char;
-        span.style.whiteSpace = 'pre';
+        span.textContent = char;
         para.appendChild(span);
       });
 
-      // Wait two frames: one to lay out, one to be safe
+      // Fit the font size to the screen before measuring
+      const fontSize = fitFontSize(para);
+
+      // Two rAFs: first forces layout, second confirms stable geometry
       requestAnimationFrame(() => requestAnimationFrame(() => {
-        const spans  = [...para.querySelectorAll('span')];
-        const chars  = [...SENTENCE];
+        const spans = [...para.querySelectorAll('span')];
 
-        chars.forEach((char, i) => {
-          const r  = spans[i].getBoundingClientRect();
+        spans.forEach((span, i) => {
+          const char = SENTENCE[i];
+          const r    = span.getBoundingClientRect();
 
-          // Create the physics span, anchored at top-left = 0,0
           const el = document.createElement('span');
-          el.className  = 'letter';
+          el.className   = 'letter';
           el.textContent = char === ' ' ? '\u00A0' : char;
+          el.style.fontSize = fontSize + 'px';
           document.body.appendChild(el);
 
-          letters.push({
+          const obj = {
             el,
-            x:  r.left,          // start exactly where the paragraph placed it
+            x:  r.left,
             y:  r.top,
-            vx: 0,               // at rest — no initial scatter
+            vx: 0,
             vy: 0,
-            w:  Math.max(r.width,  3),
-            h:  Math.max(r.height, 3),
-          });
+            w:  Math.max(r.width,  2),
+            h:  Math.max(r.height, 2),
+          };
 
-          // Position immediately so there's no flash
+          letters.push(obj);
           el.style.transform = `translate(${r.left.toFixed(2)}px,${r.top.toFixed(2)}px)`;
         });
 
-        // Remove the measuring paragraph
         para.remove();
 
-        // Short pause so user sees the readable text before gravity starts
-        setTimeout(() => {
-          running = true;
-          tick();
-        }, 600);
+        // Brief pause so reader can see the full paragraph before tilt begins
+        setTimeout(() => { running = true; tick(); }, 800);
       }));
     }
 
-    // ── Physics loop ─────────────────────────────────────────────────
+    // ── Physics loop ──────────────────────────────────────────────────
     function tick() {
       if (!running) return;
 
@@ -211,14 +224,13 @@
         l.vx *= FRICTION;
         l.vy *= FRICTION;
 
-        l.x  += l.vx;
-        l.y  += l.vy;
+        l.x += l.vx;
+        l.y += l.vy;
 
-        // Bounce off screen edges
-        if (l.x < 0)         { l.x = 0;         l.vx =  Math.abs(l.vx) * BOUNCE; }
-        if (l.x > W - l.w)   { l.x = W - l.w;   l.vx = -Math.abs(l.vx) * BOUNCE; }
-        if (l.y < 0)         { l.y = 0;          l.vy =  Math.abs(l.vy) * BOUNCE; }
-        if (l.y > H - l.h)   { l.y = H - l.h;   l.vy = -Math.abs(l.vy) * BOUNCE; }
+        if (l.x < 0)       { l.x = 0;       l.vx =  Math.abs(l.vx) * BOUNCE; }
+        if (l.x > W - l.w) { l.x = W - l.w; l.vx = -Math.abs(l.vx) * BOUNCE; }
+        if (l.y < 0)       { l.y = 0;        l.vy =  Math.abs(l.vy) * BOUNCE; }
+        if (l.y > H - l.h) { l.y = H - l.h; l.vy = -Math.abs(l.vy) * BOUNCE; }
 
         l.el.style.transform = `translate(${l.x.toFixed(2)}px,${l.y.toFixed(2)}px)`;
       }
@@ -226,18 +238,16 @@
       raf = requestAnimationFrame(tick);
     }
 
-    // ── Device orientation → gravity vector ──────────────────────────
+    // ── Device orientation → gravity vector ───────────────────────────
     function onOrientation(e) {
-      const gamma = e.gamma ?? 0;  // left/right tilt  (-90 → 90)
-      const beta  = e.beta  ?? 0;  // fwd/back tilt    (-180 → 180)
-
+      const gamma = e.gamma ?? 0;
+      const beta  = e.beta  ?? 0;
       gx = Math.max(-45, Math.min(45, gamma)) / 45 * 9.8;
       gy = Math.max(-45, Math.min(45, beta))  / 45 * 9.8;
     }
 
-    // ── Start button ─────────────────────────────────────────────────
+    // ── Start button ──────────────────────────────────────────────────
     document.getElementById('start-btn').addEventListener('click', async () => {
-      // iOS 13+ requires explicit permission for DeviceOrientationEvent
       if (
         typeof DeviceOrientationEvent !== 'undefined' &&
         typeof DeviceOrientationEvent.requestPermission === 'function'
@@ -255,12 +265,10 @@
 
       document.getElementById('start-screen').style.display = 'none';
       window.addEventListener('deviceorientation', onOrientation, true);
-
-      // Wait a frame so the start screen is truly gone before measuring
       requestAnimationFrame(measureAndBuild);
     });
 
-    // ── Pause when tab is hidden ──────────────────────────────────────
+    // ── Pause / resume on tab visibility ──────────────────────────────
     document.addEventListener('visibilitychange', () => {
       if (document.hidden) {
         running = false;
