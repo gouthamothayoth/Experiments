@@ -14,29 +14,23 @@
       width: 100%; height: 100%;
       overflow: hidden;
       touch-action: none;
-      /* very light grey exterior */
-      background: #e8e8e8;
+      background: #ffffff;
     }
 
     canvas { position: fixed; inset: 0; display: block; }
 
-    /*
-     * Invisible measurement paragraph.
-     * visibility:hidden keeps it out of sight but still laid out
-     * so getBoundingClientRect works correctly.
-     */
     #para {
       position: fixed;
       top: 0;
       visibility: hidden;
       pointer-events: none;
+      text-align: center;
       font-family: 'Courier Prime', 'Courier New', Courier, monospace;
       font-weight: 400;
       white-space: normal;
       word-break: normal;
       overflow-wrap: break-word;
       line-height: 1.78;
-      text-align: center;
       -webkit-font-smoothing: antialiased;
       -moz-osx-font-smoothing: grayscale;
       text-rendering: geometricPrecision;
@@ -51,22 +45,19 @@
 
 <script>
   /* ─── Text ──────────────────────────────────────────────────────── */
-  const QUOTE =
-    "\u201CThe cities swept about me like dead leaves, leaves that were " +
+  const SENTENCE =
+    "The cities swept about me like dead leaves, leaves that were " +
     "brightly colored but torn away from the branches. I would have " +
     "stopped, but I was pursued by something. It always came upon me " +
     "unawares, taking me altogether by surprise. Perhaps it was a " +
-    "familiar bit of music. Perhaps it was only a piece of transparent " +
-    "glass.\u201D";
-  const ATTRIBUTION = "\u2014 Tennessee Williams, The Glass Menagerie";
-  const SENTENCE = QUOTE + "\n" + ATTRIBUTION;
+    "familiar bit of music. Perhaps it was only a piece of transparent glass.";
 
   /* ─── Canvas + DPR ─────────────────────────────────────────────── */
   const canvas = document.getElementById('c');
   const ctx    = canvas.getContext('2d');
-  const dpr    = Math.min(window.devicePixelRatio || 1, 3); // cap at 3×
+  const dpr    = Math.min(window.devicePixelRatio || 1, 3);
 
-  let W, H, CX, CY, R;
+  let W, H, CX, CY;
 
   function setupCanvas() {
     W = window.innerWidth;
@@ -75,9 +66,7 @@
     canvas.height       = H * dpr;
     canvas.style.width  = W + 'px';
     canvas.style.height = H + 'px';
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0); // clean scale reset
-
-    R  = Math.min(W, H) * 0.40;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     CX = W / 2;
     CY = H / 2;
   }
@@ -86,17 +75,19 @@
   const GRAVITY     = 0.055;
   const DAMPING     = 0.983;
   const BOUNCE_LOSS = 0.36;
-  const FOCAL       = 380;     // perspective focal length (logical px)
+  const FOCAL       = 380;
+  const Z_MAX       = 260;
+  const EDGE_PAD    = 12;
 
   /* ─── State ─────────────────────────────────────────────────────── */
   let particles = [];
-  let fontSize  = 15;          // set by fitFontSize
-  let state     = 'loading';   // 'loading' → 'initial' → 'active'
+  let fontSize  = 15;
+  let state     = 'loading';
   let raf;
 
   /* ─── DOM measurement ───────────────────────────────────────────── */
   function fitFontSize(para, maxH) {
-    let size = 17;
+    let size = 18;
     para.style.fontSize = size + 'px';
     while (size > 9 && para.scrollHeight > maxH) {
       size -= 0.5;
@@ -106,68 +97,52 @@
   }
 
   function measureParticles() {
-    const para     = document.getElementById('para');
-    const usableW  = R * 1.30;   // readable width inside circle
-    const usableH  = R * 1.55;   // max height — keeps text inside circle
+    const para    = document.getElementById('para');
+    const padX    = Math.max(24, W * 0.07);
+    const padY    = Math.max(60, H * 0.10);
+    const usableW = W - padX * 2;
+    const usableH = H - padY * 2;
 
     para.style.width = usableW + 'px';
-    para.style.left  = (CX - usableW / 2) + 'px';
+    para.style.left  = padX + 'px';
 
-    // One <span> per character; \n becomes a <br> (no particle)
-    const inAttribution = { val: false };
     [...SENTENCE].forEach(char => {
-      if (char === '\n') {
-        para.appendChild(document.createElement('br'));
-        inAttribution.val = true;
-        return;
-      }
       const s = document.createElement('span');
       s.textContent = char;
-      // Attribution line is rendered at 80% size so it reads as a byline
-      if (inAttribution.val) s.style.fontSize = '80%';
       para.appendChild(s);
     });
 
-    // Shrink font until everything fits within the usable height
     fontSize = fitFontSize(para, usableH);
 
-    // Two rAFs: first triggers layout, second confirms stable geometry
     requestAnimationFrame(() => requestAnimationFrame(() => {
-      const paraH  = para.getBoundingClientRect().height;
-      const spans  = [...para.querySelectorAll('span')];
+      const paraH = para.getBoundingClientRect().height;
+      const spans = [...para.querySelectorAll('span')];
 
-      // Particle positions are stored relative to globe centre (CX, CY).
-      // The para is laid out at top:0; we shift it to be centred at CY,
-      // so each char's final screen y = (CY - paraH/2) + r.top + r.height/2.
-      // Relative to CY:  particle.y = r.top + r.height/2 - paraH/2
-
-      let spanIdx = 0;
-      let inAttr  = false;
-      [...SENTENCE].forEach(char => {
-        if (char === '\n') { inAttr = true; return; } // skip — no particle
-        const r  = spans[spanIdx++].getBoundingClientRect();
-        const fs = inAttr ? fontSize * 0.80 : fontSize;
+      [...SENTENCE].forEach((char, i) => {
+        const r = spans[i].getBoundingClientRect();
+        // Store position relative to screen centre
         particles.push({
           char,
-          fs,                                         // per-particle font size
-          x:  r.left + r.width  / 2 - CX,
-          y:  r.top  + r.height / 2 - paraH / 2,
-          z:  0,
-          vx: 0, vy: 0, vz: 0,
-          w:  Math.max(r.width,  2),
-          h:  Math.max(r.height, 2),
+          fs:  fontSize,
+          x:   r.left + r.width  / 2 - CX,
+          y:   r.top  + r.height / 2 - paraH / 2,
+          z:   0,
+          vx:  0, vy: 0, vz: 0,
+          w:   Math.max(r.width,  2),
+          h:   Math.max(r.height, 2),
         });
       });
 
       para.remove();
       state = 'initial';
-      drawFrame(); // paint readable text
+      drawFrame();
     }));
   }
 
   /* ─── Physics update ────────────────────────────────────────────── */
   function update() {
-    const innerR = R * 0.92;
+    const halfW = CX - EDGE_PAD;
+    const halfH = CY - EDGE_PAD;
 
     for (const p of particles) {
       p.vy += GRAVITY;
@@ -178,55 +153,25 @@
       p.y  += p.vy;
       p.z  += p.vz;
 
-      // Sphere boundary — reflect velocity through surface normal
-      const dist = Math.sqrt(p.x * p.x + p.y * p.y + p.z * p.z);
-      if (dist > innerR) {
-        const s  = innerR / dist;
-        p.x *= s; p.y *= s; p.z *= s;
-        const nx = p.x / innerR;
-        const ny = p.y / innerR;
-        const nz = p.z / innerR;
-        const dot = p.vx * nx + p.vy * ny + p.vz * nz;
-        if (dot > 0) {
-          p.vx -= (1 + BOUNCE_LOSS) * dot * nx;
-          p.vy -= (1 + BOUNCE_LOSS) * dot * ny;
-          p.vz -= (1 + BOUNCE_LOSS) * dot * nz;
-        }
-      }
+      // Screen-edge bounce (x, y)
+      if (p.x < -halfW) { p.x = -halfW; p.vx =  Math.abs(p.vx) * BOUNCE_LOSS; }
+      if (p.x >  halfW) { p.x =  halfW; p.vx = -Math.abs(p.vx) * BOUNCE_LOSS; }
+      if (p.y < -halfH) { p.y = -halfH; p.vy =  Math.abs(p.vy) * BOUNCE_LOSS; }
+      if (p.y >  halfH) { p.y =  halfH; p.vy = -Math.abs(p.vy) * BOUNCE_LOSS; }
+
+      // Z clamp
+      if (p.z < -Z_MAX) { p.z = -Z_MAX; p.vz =  Math.abs(p.vz) * BOUNCE_LOSS; }
+      if (p.z >  Z_MAX) { p.z =  Z_MAX; p.vz = -Math.abs(p.vz) * BOUNCE_LOSS; }
     }
   }
 
   /* ─── Render ────────────────────────────────────────────────────── */
-  const LINE_HEIGHT = 1.78; // must match CSS
-
   function drawFrame() {
-    // ── Page background (very light grey exterior) ──
-    ctx.fillStyle = '#e8e8e8';
+    ctx.fillStyle = '#ffffff';
     ctx.fillRect(0, 0, W, H);
 
-    // ── Globe interior fill (white) ──
-    // Tiny radial gradient gives depth without colour tint
-    const bg = ctx.createRadialGradient(
-      CX - R * 0.12, CY - R * 0.12, 0,
-      CX, CY, R
-    );
-    bg.addColorStop(0,   '#ffffff');
-    bg.addColorStop(0.8, '#fefefe');
-    bg.addColorStop(1,   '#f9f9f9');
-
-    ctx.beginPath();
-    ctx.arc(CX, CY, R, 0, Math.PI * 2);
-    ctx.fillStyle = bg;
-    ctx.fill();
-
-    // ── Characters ──
-    ctx.save();
-    ctx.beginPath();
-    ctx.arc(CX, CY, R, 0, Math.PI * 2);
-    ctx.clip();
-
     if (state === 'initial') {
-      // ── Flat readable paragraph ──
+      // Flat, readable paragraph
       ctx.textBaseline = 'middle';
       ctx.textAlign    = 'center';
 
@@ -238,13 +183,14 @@
       }
 
     } else {
-      // ── 3-D physics particles ──
-      // Perspective bounds for alpha normalisation
-      const pMax = FOCAL / (FOCAL - R * 0.92);
-      const pMin = FOCAL / (FOCAL + R * 0.92);
+      // 3-D physics particles
+      const pMax = FOCAL / (FOCAL - Z_MAX);
+      const pMin = FOCAL / (FOCAL + Z_MAX);
 
-      // Painter's algorithm: draw farthest (largest z) first
       const sorted = [...particles].sort((a, b) => b.z - a.z);
+
+      ctx.textBaseline = 'middle';
+      ctx.textAlign    = 'center';
 
       for (const p of sorted) {
         if (!p.char.trim()) continue;
@@ -253,57 +199,23 @@
         const sx    = CX + p.x * persp;
         const sy    = CY + p.y * persp;
         const fs    = Math.max(6, p.fs * persp);
-        const alpha = 0.12 + 0.88 * Math.max(0, (persp - pMin) / (pMax - pMin));
+        const alpha = 0.10 + 0.90 * Math.max(0, (persp - pMin) / (pMax - pMin));
 
-        ctx.globalAlpha  = Math.min(1, alpha);
-        ctx.fillStyle    = '#111111';
-        ctx.font         = `${fs.toFixed(2)}px 'Courier Prime','Courier New',Courier,monospace`;
-        ctx.textBaseline = 'middle';
-        ctx.textAlign    = 'center';
+        ctx.globalAlpha = Math.min(1, alpha);
+        ctx.fillStyle   = '#111111';
+        ctx.font        = `${fs.toFixed(2)}px 'Courier Prime','Courier New',Courier,monospace`;
         ctx.fillText(p.char, sx, sy);
       }
       ctx.globalAlpha = 1;
     }
 
-    ctx.restore();
-
-    // ── Subtle glass highlight (top-left arc) ──
-    const glass = ctx.createRadialGradient(
-      CX - R * 0.36, CY - R * 0.36, R * 0.03,
-      CX - R * 0.08, CY - R * 0.08, R
-    );
-    glass.addColorStop(0,    'rgba(255,255,255,0.38)');
-    glass.addColorStop(0.22, 'rgba(255,255,255,0.10)');
-    glass.addColorStop(0.6,  'rgba(255,255,255,0.02)');
-    glass.addColorStop(1,    'rgba(248,248,252,0.00)');
-
-    ctx.beginPath();
-    ctx.arc(CX, CY, R, 0, Math.PI * 2);
-    ctx.fillStyle = glass;
-    ctx.fill();
-
-    // ── Globe ring ──
-    // Outer stroke (light grey, matches exterior)
-    ctx.beginPath();
-    ctx.arc(CX, CY, R, 0, Math.PI * 2);
-    ctx.strokeStyle = 'rgba(0,0,0,0.10)';
-    ctx.lineWidth   = 1.5;
-    ctx.stroke();
-
-    // Faint inner shadow ring for depth
-    ctx.beginPath();
-    ctx.arc(CX, CY, R - 2, 0, Math.PI * 2);
-    ctx.strokeStyle = 'rgba(0,0,0,0.04)';
-    ctx.lineWidth   = 5;
-    ctx.stroke();
-
-    // ── "tap" hint — only in initial state, very quiet ──
+    // Quiet "tap" hint — only before physics start
     if (state === 'initial') {
-      ctx.fillStyle    = 'rgba(0,0,0,0.20)';
+      ctx.fillStyle    = 'rgba(0,0,0,0.18)';
       ctx.font         = `11px 'Courier Prime','Courier New',Courier,monospace`;
-      ctx.textBaseline = 'top';
+      ctx.textBaseline = 'bottom';
       ctx.textAlign    = 'center';
-      ctx.fillText('tap', CX, CY + R + 14);
+      ctx.fillText('tap', CX, H - 24);
     }
   }
 
@@ -318,7 +230,7 @@
   function applyShake(strength) {
     for (const p of particles) {
       p.vx += (Math.random() - 0.5) * 11 * strength;
-      p.vy += (Math.random() * -0.9 - 0.1) * 11 * strength; // upward bias
+      p.vy += (Math.random() * -0.9 - 0.1) * 11 * strength;
       p.vz += (Math.random() - 0.5) * 11 * strength;
     }
   }
@@ -327,19 +239,17 @@
   function startPhysics() {
     if (state === 'active') return;
     state = 'active';
-    // Spread particles in z so depth effect is immediately visible
     for (const p of particles) {
-      p.z = (Math.random() - 0.5) * R * 0.4;
+      p.z = (Math.random() - 0.5) * Z_MAX * 0.4;
     }
     applyShake(1.2);
     loop();
   }
 
-  /* ─── Tap / click ───────────────────────────────────────────────── */
+  /* ─── Tap ───────────────────────────────────────────────────────── */
   let permAsked = false;
 
   canvas.addEventListener('click', async () => {
-    // Request DeviceMotion permission on first tap (iOS 13+)
     if (!permAsked) {
       permAsked = true;
       if (
@@ -349,7 +259,7 @@
         try {
           const perm = await DeviceMotionEvent.requestPermission();
           if (perm === 'granted') window.addEventListener('devicemotion', onMotion);
-        } catch (e) { /* proceed without motion */ }
+        } catch (e) {}
       } else {
         window.addEventListener('devicemotion', onMotion);
       }
@@ -360,33 +270,25 @@
   });
 
   /* ─── Device shake ──────────────────────────────────────────────── */
-  let lastAcc   = { x: 0, y: 0, z: 0 };
-  let shakeTimer;
+  let lastAcc = { x: 0, y: 0, z: 0 };
 
   function onMotion(e) {
     const acc = e.accelerationIncludingGravity;
     if (!acc) return;
-
     const dx  = (acc.x || 0) - lastAcc.x;
     const dy  = (acc.y || 0) - lastAcc.y;
     const dz  = (acc.z || 0) - lastAcc.z;
     const mag = Math.sqrt(dx * dx + dy * dy + dz * dz);
-
     if (mag > 12) {
-      const str = Math.min(mag / 12, 2.5);
       if (state === 'initial') startPhysics();
-      else                     applyShake(str);
-
-      clearTimeout(shakeTimer);
-      shakeTimer = setTimeout(() => {}, 200);
+      else applyShake(Math.min(mag / 12, 2.5));
     }
-
     lastAcc = { x: acc.x || 0, y: acc.y || 0, z: acc.z || 0 };
   }
 
   /* ─── Boot ──────────────────────────────────────────────────────── */
   async function init() {
-    await document.fonts.ready; // ensure Courier Prime is loaded before measuring
+    await document.fonts.ready;
     setupCanvas();
     measureParticles();
   }
@@ -396,25 +298,13 @@
   /* ─── Resize ────────────────────────────────────────────────────── */
   window.addEventListener('resize', () => {
     setupCanvas();
-    if (state === 'active') {
-      // Re-clamp particles to new sphere size
-      const innerR = R * 0.92;
-      for (const p of particles) {
-        const d = Math.sqrt(p.x * p.x + p.y * p.y + p.z * p.z);
-        if (d > innerR) { const s = innerR / d; p.x *= s; p.y *= s; p.z *= s; }
-      }
-    } else if (state === 'initial') {
-      drawFrame();
-    }
+    if (state === 'initial') drawFrame();
   });
 
   /* ─── Pause on hide ─────────────────────────────────────────────── */
   document.addEventListener('visibilitychange', () => {
-    if (document.hidden) {
-      cancelAnimationFrame(raf);
-    } else if (state === 'active' && particles.length) {
-      loop();
-    }
+    if (document.hidden) cancelAnimationFrame(raf);
+    else if (state === 'active' && particles.length) loop();
   });
 </script>
 </body>
