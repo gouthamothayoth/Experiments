@@ -72,9 +72,9 @@
   }
 
   /* ─── Physics constants ─────────────────────────────────────────── */
-  const GRAVITY     = 0.055;
-  const DAMPING     = 0.983;
-  const BOUNCE_LOSS = 0.36;
+  const GRAVITY     = 0.018;
+  const DAMPING     = 0.994;
+  const BOUNCE_LOSS = 0.15;
   const FOCAL       = 380;
   const Z_MAX       = 260;
   const EDGE_PAD    = 12;
@@ -217,6 +217,92 @@
       ctx.textAlign    = 'center';
       ctx.fillText('tap', CX, H - 24);
     }
+
+    drawGlassEdges();
+  }
+
+  /* ─── Glass edge refraction overlay ────────────────────────────── */
+  function drawGlassEdges() {
+    const T = Math.min(W, H) * 0.13; // refraction band thickness
+    let g;
+
+    // ── Frosted white haze on all four edges ──
+    // Simulates how a curved glass lens scatters and brightens at the rim
+
+    g = ctx.createLinearGradient(0, 0, T, 0);          // left
+    g.addColorStop(0,    'rgba(255,255,255,0.82)');
+    g.addColorStop(0.45, 'rgba(255,255,255,0.18)');
+    g.addColorStop(1,    'rgba(255,255,255,0)');
+    ctx.fillStyle = g; ctx.fillRect(0, 0, T, H);
+
+    g = ctx.createLinearGradient(W, 0, W - T, 0);      // right
+    g.addColorStop(0,    'rgba(255,255,255,0.82)');
+    g.addColorStop(0.45, 'rgba(255,255,255,0.18)');
+    g.addColorStop(1,    'rgba(255,255,255,0)');
+    ctx.fillStyle = g; ctx.fillRect(W - T, 0, T, H);
+
+    g = ctx.createLinearGradient(0, 0, 0, T);           // top
+    g.addColorStop(0,    'rgba(255,255,255,0.82)');
+    g.addColorStop(0.45, 'rgba(255,255,255,0.18)');
+    g.addColorStop(1,    'rgba(255,255,255,0)');
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, T);
+
+    g = ctx.createLinearGradient(0, H, 0, H - T);      // bottom
+    g.addColorStop(0,    'rgba(255,255,255,0.82)');
+    g.addColorStop(0.45, 'rgba(255,255,255,0.18)');
+    g.addColorStop(1,    'rgba(255,255,255,0)');
+    ctx.fillStyle = g; ctx.fillRect(0, H - T, W, T);
+
+    // ── Chromatic dispersion fringe ──
+    // Glass splits white light — cool blue shifts to the left,
+    // warm amber to the right, like looking through a prism edge.
+
+    g = ctx.createLinearGradient(0, 0, T * 0.55, 0);
+    g.addColorStop(0, 'rgba(170,205,255,0.30)');
+    g.addColorStop(1, 'rgba(170,205,255,0)');
+    ctx.fillStyle = g; ctx.fillRect(0, 0, T * 0.55, H);
+
+    g = ctx.createLinearGradient(W, 0, W - T * 0.55, 0);
+    g.addColorStop(0, 'rgba(255,215,140,0.28)');
+    g.addColorStop(1, 'rgba(255,215,140,0)');
+    ctx.fillStyle = g; ctx.fillRect(W - T * 0.55, 0, T * 0.55, H);
+
+    g = ctx.createLinearGradient(0, 0, 0, T * 0.55);
+    g.addColorStop(0, 'rgba(200,225,255,0.22)');
+    g.addColorStop(1, 'rgba(200,225,255,0)');
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, T * 0.55);
+
+    g = ctx.createLinearGradient(0, H, 0, H - T * 0.55);
+    g.addColorStop(0, 'rgba(255,230,180,0.22)');
+    g.addColorStop(1, 'rgba(255,230,180,0)');
+    ctx.fillStyle = g; ctx.fillRect(0, H - T * 0.55, W, T * 0.55);
+
+    // ── Corner vignette ──
+    // Corners of a curved glass are thickest — darker and more opaque.
+    const cornerR = T * 1.6;
+    const corners = [[0, 0], [W, 0], [W, H], [0, H]];
+    for (const [cx, cy] of corners) {
+      const vg = ctx.createRadialGradient(cx, cy, 0, cx, cy, cornerR);
+      vg.addColorStop(0,    'rgba(255,255,255,0.55)');
+      vg.addColorStop(0.5,  'rgba(255,255,255,0.12)');
+      vg.addColorStop(1,    'rgba(255,255,255,0)');
+      ctx.fillStyle = vg;
+      ctx.fillRect(
+        cx === 0 ? 0 : W - cornerR,
+        cy === 0 ? 0 : H - cornerR,
+        cornerR, cornerR
+      );
+    }
+
+    // ── Specular hairline — bright rim right at the very edge ──
+    ctx.strokeStyle = 'rgba(255,255,255,0.95)';
+    ctx.lineWidth   = 1.5;
+    ctx.strokeRect(0.75, 0.75, W - 1.5, H - 1.5);
+
+    // ── Dark outer bezel — gives the glass physical thickness ──
+    ctx.strokeStyle = 'rgba(0,0,0,0.13)';
+    ctx.lineWidth   = 2.5;
+    ctx.strokeRect(1.25, 1.25, W - 2.5, H - 2.5);
   }
 
   /* ─── Animation loop ────────────────────────────────────────────── */
